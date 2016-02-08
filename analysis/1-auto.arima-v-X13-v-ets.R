@@ -10,6 +10,8 @@ library(ggplot2)
 library(scales)
 library(RColorBrewer)
 
+devtools::install_github("christophsax/seasonal", ref = "feature/robust.seas")
+
 
 checkX13()
 
@@ -29,22 +31,23 @@ ab3 <- as.matrix(M3Forecast$AutoBox3)[1:nseries, ]
 ets1 <- aarima <- hybrid2 <- x13 <- hybrid_x13 <- hybrid3 <- matrix(NA, nrow = nseries, ncol = 18)
 
 # produce new forecasts
+
+
 for(i in 1:nseries){
    print(i)
-   ets1[i, ] <- forecast(ets(M3[[i]]$x), h = 18, PI = FALSE)$mean
-   aarima[i, ] <- forecast(auto.arima(M3[[i]]$x), h = 18)$mean
-         
+   # ets1[i, ] <- forecast(ets(M3[[i]]$x), h = 18, PI = FALSE)$mean
+   aarima[i, ] <- forecast(auto.arima(M3[[i]]$x), h = 18)$mean   
+}
+
+
+for(i in 1:nseries){
+   print(i)
    if(M3[[i]]$period != "YEARLY"){
-      try(m <- seas(M3[[i]]$x, forecast.maxlead = 18)) 
+      m <- robust.seas(M3[[i]]$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL)
    } else {
-      try(m <- seas(M3[[i]]$x, 
-                    regression.aictest = NULL, 
-                    regression.variables = c("const"), 
-                    forecast.maxlead = 18)) 
-   }
-   try(x13[i, ] <- series(m, "forecast.forecasts")[1:18 , 1]) 
-   
-   
+      m <- robust.seas(M3[[i]]$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL, regression.aictest = NULL)
+   }  
+   x13[i, ] <- series(m, "forecast.forecasts")[1:18 , 1]
 }
 
 
