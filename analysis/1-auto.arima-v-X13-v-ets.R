@@ -10,7 +10,6 @@ library(ggplot2)
 library(scales)
 library(RColorBrewer)
 
-devtools::install_github("christophsax/seasonal", ref = "feature/robust.seas")
 
 
 checkX13()
@@ -28,50 +27,171 @@ ab2 <- as.matrix(M3Forecast$AutoBox2)[1:nseries, ]
 ab3 <- as.matrix(M3Forecast$AutoBox3)[1:nseries, ]
 
 # set up matrices to hold the forecasts from new methods
-ets1 <- aarima <- hybrid2 <- x13 <- hybrid_x13 <- hybrid3 <- matrix(NA, nrow = nseries, ncol = 18)
-
-# produce new forecasts
+hybrid2 <- hybrid_x13 <- hybrid3 <- matrix(NA, nrow = nseries, ncol = 18)
 
 
-for(i in 1:nseries){
-   print(i)
-   # ets1[i, ] <- forecast(ets(M3[[i]]$x), h = 18, PI = FALSE)$mean
-   aarima[i, ] <- forecast(auto.arima(M3[[i]]$x), h = 18)$mean   
+### use new robust.seas function from seasonal dev
+
+devtools::install_github("christophsax/seasonal", ref = "feature/robust.seas")
+
+
+### cluster parallelization, which also works on Windows
+# (on Linux and Mac, you can use mclapply, which is much easier)
+
+library(parallel)
+
+# set up cluster
+cl <- makeCluster(detectCores())
+
+# load 'seasonal' for each node
+clusterEvalQ(cl, {library(seasonal); library(forecast)})
+
+# export data to each node
+clusterExport(cl, varlist = "M3")
+
+# run in parallel (on an older Macbook Pro with 8 cores)
+
+system.time({
+  lets1 <- parLapply(cl, M3, function(e) forecast(ets(e$x), h = 18, PI = FALSE)$mean)
+})
+#  user  system elapsed 
+# 0.039   0.013 264.158 
+
+system.time({
+  laarima <- parLapply(cl, M3, function(e) forecast(auto.arima(e$x), h = 18)$mean)
+})
+#  user  system elapsed 
+# 0.041   0.014 312.261 
+
+# X-13 at least wins the speed contest!
+system.time({
+  lx13 <- parLapply(cl, M3, function(e) series(robust.seas(e$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL), "forecast.forecasts")[, 1])
+})
+#  user  system elapsed 
+# 0.049   0.017  62.936
+
+# finally, stop the cluster
+stopCluster(cl)
+
+
+# --- Compute accuracy ---------------------------------------------------------
+
+lact <- lapply(M3, function(e) e$xx)
+lscl <- lapply(M3, function(e) mean(abs(diff(e$x, lag = frequency(e$x)))))
+
+toList <- function(m){
+  m <- as.matrix(m)
+  z <- list()
+  for (i in 1:nrow(m)){
+    zi <- m[i, ]
+    z[[i]] <- zi[!is.na(zi)]
+  }
+  z
 }
 
 
-for(i in 1:nseries){
-   print(i)
-   if(M3[[i]]$period != "YEARLY"){
-      m <- robust.seas(M3[[i]]$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL)
-   } else {
-      m <- robust.seas(M3[[i]]$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL, regression.aictest = NULL)
-   }  
-   x13[i, ] <- series(m, "forecast.forecasts")[1:18 , 1]
+# collect fct in a big list
+ll <- list()
+ll$act <- lact
+ll$scl <- lscl
+ll$theta <- toList(M3Forecast$THETA)
+ll$x13 <- lx13
+ll$aarima <- laarima
+ll$ets1 <- lets1
+
+
+
+lMASE <- function(ll){
+  MASE <- function(lfct){
+    ff <- function(act, fct, scl) mean(abs(c(act) - c(fct)[1:length(act)])) / scl
+    mean(unlist(Map(ff, act = ll$act, fct = lfct, scl = ll$scl)))
+  }
+
+  lapply(ll[-c(1,2)], MASE)
 }
 
 
-# 92 failures in first 500 series; 412 in total, various reasons
-message(sum(is.na(x13[ , 1])), " series failed for X13, replacing them with auto.arima's results")
-bad <- is.na(x13)
-bad[ ,1]
-save(bad, x13, file = "tmp_bad_and_x13.rda")
+ll.m <- lapply(ll, function(e) e[sapply(M3, function(e) e$period == "MONTHLY")])
+ll.q <- lapply(ll, function(e) e[sapply(M3, function(e) e$period == "QUARTERLY")])
+ll.y <- lapply(ll, function(e) e[sapply(M3, function(e) e$period == "YEARLY")])
 
-# create a copy of x13 that uses auto arima when it's bad
-x13_2 <- x13
-x13_2[bad] <- aarima[bad]
 
-for(i in 1:nseries){
-   hybrid2[i, ] <- (aarima[i, ] + ets1[i, ]) / 2
-   hybrid_x13[i, ] <- (aarima[i, ] + x13_2[i, ]) / 2
-   hybrid3[i, ] <- (aarima[i, ] + ets1[i, ] + x13_2[i, ]) / 3
+lMASE(ll)
+# $theta
+# [1] 1.394629
+
+# $x13
+# [1] 1.557856
+
+# $aarima
+# [1] 1.460277
+
+# $ets1
+# [1] 1.426508
+
+
+lMASE(ll.m)
+# $theta
+# [1] 0.8578892
+
+# $x13
+# [1] 0.8757007
+
+# $aarima
+# [1] 0.8806883
+
+# $ets1
+# [1] 0.8638731
+
+
+lMASE(ll.q)
+# $theta
+# [1] 1.086772
+
+# $x13
+# [1] 1.250895
+
+# $aarima
+# [1] 1.186706
+
+# $ets1
+# [1] 1.178036
+
+
+lMASE(ll.y)
+# $theta
+# [1] 2.806325
+
+# $x13
+# [1] 3.241308
+
+# $aarima
+# [1] 2.963824
+
+# $ets1
+# [1] 2.864631
+
+
+
+# X-13 better for monthly data, but worse for annual and quarterly...
+
+
+
+# looking, e.g at quarterly data does not reveal any obvious problem...
+
+l <- ll.q
+
+for (i in 1:length(l$act)){
+  cat ("Press [enter] to continue")
+  line <- readline()
+  ts.plot(cbind(l$act[[i]], l$aarima[[i]], l$x13[[i]]), col = c(1, 3, 2))
 }
-   
-# for future reference, which series are the bad ones?
-bad_series <- which(bad[, 1])
 
 
-# Compute accuracy
+
+
+# --- Compute accuracy ---------------------------------------------------------
+
 number_methods <- 13
 mase <- mape <- smape <- matrix(NA, nrow = number_methods, ncol = nseries)
 f <- matrix(NA, nrow = number_methods, ncol = 18)
@@ -148,7 +268,7 @@ dev.off()
 auto.arima(M3[[434]]$x)
 
 # this fails
-seas(M3[[434]]$x, regression.aictest = NULL)
+robust.seas(M3[[434]]$x)
 seas(M3[[434]]$x, regression.aictest = NULL, x11 = "")
 
 # but if we manually specify the model
@@ -216,7 +336,7 @@ dev.off()
 auto.arima(M3[[1485]]$x)
 
 # takes a long time and eventually fails for unknown reason:
-seas(M3[[1485]]$x)
+robust.seas(M3[[1485]]$x)
 
 
 # still fails:
