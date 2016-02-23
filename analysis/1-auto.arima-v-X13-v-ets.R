@@ -5,7 +5,7 @@
 
 
 # use new robust.seas function from seasonal dev
-devtools::install_github("christophsax/seasonal", ref = "feature/robust.seas")
+devtools::install_github("christophsax/seasonal")
 
 library(Mcomp)     # competition data
 library(seasonal)
