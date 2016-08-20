@@ -4,8 +4,8 @@
 # extended by Christoph Sax, using robust.seas and parallelization
 
 
-# use new robust.seas function from seasonal dev
-devtools::install_github("christophsax/seasonal")
+# use robust.seas function from the seasonallab package
+devtools::install_github("christophsax/seasonallab")
 
 library(Mcomp)     # competition data
 library(seasonal)
