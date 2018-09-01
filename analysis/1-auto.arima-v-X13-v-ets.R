@@ -11,6 +11,7 @@ library(Mcomp)     # competition data
 library(seasonal)
 library(forecast) 
 library(parallel)  # part of R base, but needs to be loaded
+library(forecastHybrid)
 
 
 # --- cluster parallelization, which also works on Windows ---------------------
@@ -21,7 +22,7 @@ library(parallel)  # part of R base, but needs to be loaded
 cl <- makeCluster(detectCores())
 
 # load 'seasonal' for each node
-clusterEvalQ(cl, {library(seasonal); library(forecast)})
+clusterEvalQ(cl, {library(seasonal); library(forecast); library(forecastHybrid)})
 
 # export data to each node
 clusterExport(cl, varlist = "M3")
@@ -29,7 +30,7 @@ clusterExport(cl, varlist = "M3")
 # run in parallel (times on an older Macbook Pro with 8 cores)
 
 system.time({
-  lets1 <- parLapply(cl, M3, function(e) forecast(ets(e$x), h = 18, PI = FALSE)$mean)
+  lets1 <- parLapply(cl, M3, function(e) predict(hybridModel(e$x, weights = "equal"), h = 18, PI = FALSE)$mean)
 })
 #  user  system elapsed 
 # 0.039   0.013 264.158 
@@ -43,6 +44,19 @@ system.time({
 # X-13 at least wins the speed contest!
 system.time({
   lx13 <- parLapply(cl, M3, function(e) series(robust.seas(e$x, forecast.save = "fct", forecast.maxlead = 18, seats = NULL), "forecast.forecasts")[, 1])
+})
+#  user  system elapsed 
+# 0.049   0.017  62.936
+
+
+system.time({
+  comb1 <- parLapply(cl, M3, function(e) predict(hybridModel(e$x, weights = "equal"), h = 18, PI = FALSE)$mean)
+})
+#  user  system elapsed 
+# 0.049   0.017  62.936
+
+system.time({
+  comb2 <- parLapply(cl, M3, function(e) predict(hybridModel(e$x, weights = "equal"), h = 18, PI = FALSE)$mean)
 })
 #  user  system elapsed 
 # 0.049   0.017  62.936
